@@ -9,7 +9,7 @@ import functools
 from jax import numpy as jnp
 
 import warnings
-from jax.config import config
+from jax import config
 
 def check_float64_enabled():
     if not config.read("jax_enable_x64"):
@@ -394,12 +394,11 @@ def _besseljn_forward_recurrence(z, v: int):
         jnplus = (2 * k) / z * jn - jnm1
         return (jn, jnplus)
 
-    return jax.lax.fori_loop(1, v, body, (j0(z), j1(z)))[-1]
+    return jax.lax.fori_loop(1, v, body, (J0(z), J1(z)))[-1]
 
 
 @functools.partial(jax.custom_jvp, nondiff_argnums=(0,))
-@jnp.vectorize
-@jax.jit
+@functools.partial(jax.jit, static_argnames=["v"])
 def Jn(v, z):
     """
     Bessel function uses a range of computational techniques to achieve accuracy in three
@@ -440,19 +439,19 @@ def Jn(v, z):
     if dtypes.issubdtype(lax.dtype(z), complex):
         raise ValueError("complex input not supported.")
 
-    if not dtypes.issubdtype(lax.dtype(v), np.integer):
+    if not isinstance(v, int):
         raise ValueError("Order must be integer type.")
 
     # Compute absolute values of input x-values and orders
     zabs = jnp.abs(z)
-    vabs = jnp.abs(v)
+    vabs = abs(v)
 
     # Used to compute the number of terms necessary for backwards recurrence to be accurate
-    n_iter = jnp.maximum(vabs + jnp.sqrt(40.0 * vabs), 50).astype(int)
+    n_iter = max(vabs + (40.0 * vabs) ** 0.5, 50)
 
     # Get sign conventions for negative z and v inputs
     z_sign = jnp.where(z < 0, (-1) ** vabs, 1)
-    v_sign = jnp.where(v < 0, (-1) ** vabs, 1)
+    v_sign = (-1) ** vabs if v < 0 else 1
 
     return z_sign * v_sign * jnp.select(
         [
@@ -463,13 +462,13 @@ def Jn(v, z):
             zabs >= vabs,
         ],
         [
-            j0(zabs),
-            j1(zabs),
+            J0(zabs),
+            J1(zabs),
             _besseljn_power_series(zabs, v=vabs),
             _besseljn_backward_recurrence(
                 zabs,
                 v=vabs,
-                n_iter=n_iter
+                n_iter=int(n_iter)
             ),
             _besseljn_forward_recurrence(zabs, vabs),
         ],
